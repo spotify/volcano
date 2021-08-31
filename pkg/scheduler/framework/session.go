@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 	volumescheduling "k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumebinding"
@@ -38,8 +39,11 @@ import (
 type Session struct {
 	UID types.UID
 
-	kubeClient kubernetes.Interface
-	cache      cache.Cache
+	kubeClient      kubernetes.Interface
+	cache           cache.Cache
+	informerFactory informers.SharedInformerFactory
+
+	TotalResource *api.Resource
 	// podGroupStatus cache podgroup status during schedule
 	// This should not be mutated after initiated
 	podGroupStatus map[api.JobID]scheduling.PodGroupStatus
@@ -80,9 +84,10 @@ type Session struct {
 
 func openSession(cache cache.Cache) *Session {
 	ssn := &Session{
-		UID:        uuid.NewUUID(),
-		kubeClient: cache.Client(),
-		cache:      cache,
+		UID:             uuid.NewUUID(),
+		kubeClient:      cache.Client(),
+		cache:           cache,
+		informerFactory: cache.SharedInformerFactory(),
 
 		podGroupStatus: map[api.JobID]scheduling.PodGroupStatus{},
 
@@ -426,6 +431,11 @@ func (ssn *Session) AddEventHandler(eh *EventHandler) {
 // KubeClient returns the kubernetes client
 func (ssn Session) KubeClient() kubernetes.Interface {
 	return ssn.kubeClient
+}
+
+// InformerFactory returns the scheduler ShareInformerFactory
+func (ssn Session) InformerFactory() informers.SharedInformerFactory {
+	return ssn.informerFactory
 }
 
 //String return nodes and jobs information in the session

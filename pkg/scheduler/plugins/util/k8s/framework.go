@@ -152,15 +152,7 @@ func (f *Framework) Parallelizer() parallelize.Parallelizer {
 }
 
 // NewFrameworkHandle creates a FrameworkHandle interface, which is used by k8s plugins.
-func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client kubernetes.Interface) framework.Handle {
-	snapshot := NewSnapshot(nodeMap)
-	return &Framework{
-		snapshot:   snapshot,
-		kubeClient: client,
-	}
-}
-
-// func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client kubernetes.Interface, informerFactory informers.SharedInformerFactory) framework.Handle {
+// func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client kubernetes.Interface) framework.Handle {
 // 	snapshot := NewSnapshot(nodeMap)
 // 	return &Framework{
 // 		snapshot:        snapshot,
@@ -168,3 +160,12 @@ func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client kubernete
 // 		informerFactory: informerFactory,
 // 	}
 // }
+
+func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client kubernetes.Interface, informerFactory informers.SharedInformerFactory) framework.Handle {
+	snapshot := NewSnapshot(nodeMap)
+	return &Framework{
+		snapshot:        snapshot,
+		kubeClient:      client,
+		informerFactory: informerFactory,
+	}
+}

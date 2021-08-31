@@ -18,6 +18,7 @@ package cache
 
 import (
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	scheduling "k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumebinding"
 
@@ -60,6 +61,9 @@ type Cache interface {
 
 	// Client returns the kubernetes clientSet, which can be used by plugins
 	Client() kubernetes.Interface
+
+	// SharedInformerFactory return scheduler SharedInformerFactory
+	SharedInformerFactory() informers.SharedInformerFactory
 }
 
 // VolumeBinder interface for allocate and bind volumes

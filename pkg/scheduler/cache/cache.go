@@ -109,6 +109,8 @@ type SchedulerCache struct {
 
 	errTasks    workqueue.RateLimitingInterface
 	deletedJobs workqueue.RateLimitingInterface
+
+	informerFactory informers.SharedInformerFactory
 }
 
 type defaultBinder struct {
@@ -331,6 +333,7 @@ func newSchedulerCache(config *rest.Config, schedulerName string, defaultQueue s
 	}
 
 	informerFactory := informers.NewSharedInformerFactory(sc.kubeClient, 0)
+	sc.informerFactory = informerFactory
 
 	// create informer for node information
 	sc.nodeInformer = informerFactory.Core().V1().Nodes()
@@ -618,6 +621,11 @@ func (sc *SchedulerCache) BindVolumes(task *schedulingapi.TaskInfo, podVolumes *
 // Client returns the kubernetes clientSet
 func (sc *SchedulerCache) Client() kubernetes.Interface {
 	return sc.kubeClient
+}
+
+// SharedInformerFactory returns the scheduler SharedInformerFactory
+func (sc *SchedulerCache) SharedInformerFactory() informers.SharedInformerFactory {
+	return sc.informerFactory
 }
 
 // taskUnschedulable updates pod status of pending task
