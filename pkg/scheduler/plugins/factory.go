@@ -28,8 +28,9 @@ import (
 	"volcano.sh/volcano/pkg/scheduler/plugins/priority"
 	"volcano.sh/volcano/pkg/scheduler/plugins/proportion"
 	"volcano.sh/volcano/pkg/scheduler/plugins/reservation"
+	"volcano.sh/volcano/pkg/scheduler/plugins/resourcequota"
 	"volcano.sh/volcano/pkg/scheduler/plugins/sla"
-	"volcano.sh/volcano/pkg/scheduler/plugins/task-topology"
+	tasktopology "volcano.sh/volcano/pkg/scheduler/plugins/task-topology"
 	"volcano.sh/volcano/pkg/scheduler/plugins/tdm"
 )
 
@@ -50,4 +51,10 @@ func init() {
 
 	// Plugins for Queues
 	framework.RegisterPluginBuilder(proportion.PluginName, proportion.New)
+
+	// Plugins for Extender
+	// framework.RegisterPluginBuilder(extender.PluginName, extender.New)
+
+	// Plugins for ResourceQuota
+	framework.RegisterPluginBuilder(resourcequota.PluginName, resourcequota.New)
 }

@@ -24,6 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/klog"
+	quotacore "k8s.io/kubernetes/pkg/quota/v1/evaluator/core"
+	"k8s.io/utils/clock"
 
 	"volcano.sh/apis/pkg/apis/helpers"
 	scheduling "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
@@ -140,4 +142,11 @@ func newPGOwnerReferences(pod *v1.Pod) []metav1.OwnerReference {
 	}
 	ref := metav1.NewControllerRef(pod, gvk)
 	return []metav1.OwnerReference{*ref}
+}
+
+// calcPGMinResources calculate podgroup minimum resource
+func calcPGMinResources(pod *v1.Pod) *v1.ResourceList {
+	pgMinRes, _ := quotacore.PodUsageFunc(pod, clock.RealClock{})
+
+	return &pgMinRes
 }

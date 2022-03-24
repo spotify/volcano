@@ -628,6 +628,31 @@ func (sc *SchedulerCache) SharedInformerFactory() informers.SharedInformerFactor
 	return sc.informerFactory
 }
 
+// UpdateSchedulerNumaInfo used to update scheduler node cache NumaSchedulerInfo
+// func (sc *SchedulerCache) UpdateSchedulerNumaInfo(AllocatedSets map[string]schedulingapi.ResNumaSets) error {
+// 	sc.Mutex.Lock()
+// 	defer sc.Mutex.Unlock()
+
+// 	for nodeName, sets := range AllocatedSets {
+// 		if _, found := sc.Nodes[nodeName]; !found {
+// 			continue
+// 		}
+
+// 		numaInfo := sc.Nodes[nodeName].NumaSchedulerInfo
+// 		if numaInfo == nil {
+// 			continue
+// 		}
+
+// 		numaInfo.Allocate(sets)
+// 	}
+// 	return nil
+// }
+
+// EventRecorder returns the Event Recorder
+func (sc *SchedulerCache) EventRecorder() record.EventRecorder {
+	return sc.Recorder
+}
+
 // taskUnschedulable updates pod status of pending task
 func (sc *SchedulerCache) taskUnschedulable(task *schedulingapi.TaskInfo, message string) error {
 	pod := task.Pod

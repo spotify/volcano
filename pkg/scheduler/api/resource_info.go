@@ -19,6 +19,7 @@ package api
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	v1helper "k8s.io/kubernetes/pkg/scheduler/util"
@@ -83,6 +84,9 @@ func NewResource(rl v1.ResourceList) *Resource {
 		case v1.ResourcePods:
 			r.MaxTaskNum += int(rQuant.Value())
 		default:
+			if isCountQuota(rName) {
+				continue
+			}
 			//NOTE: When converting this back to k8s resource, we need record the format as well as / 1000
 			if v1helper.IsScalarResourceName(rName) {
 				r.AddScalar(rName, float64(rQuant.MilliValue()))
@@ -442,4 +446,90 @@ func (r *Resource) MinDimensionResource(rr *Resource) *Resource {
 		}
 	}
 	return r
+}
+
+// // setDefaultValue sets default value for resource dimension not defined of ScalarResource in leftResource and rightResource
+// // @param defaultValue "default value for resource dimension not defined in ScalarResources. It can only be one of 'Zero' or 'Infinity'"
+// func (r *Resource) setDefaultValue(leftResource, rightResource *Resource, defaultValue DimensionDefaultValue) {
+// 	if leftResource.ScalarResources == nil {
+// 		leftResource.ScalarResources = map[v1.ResourceName]float64{}
+// 	}
+// 	if rightResource.ScalarResources == nil {
+// 		rightResource.ScalarResources = map[v1.ResourceName]float64{}
+// 	}
+// 	for resourceName := range leftResource.ScalarResources {
+// 		_, ok := rightResource.ScalarResources[resourceName]
+// 		if !ok {
+// 			if defaultValue == Zero {
+// 				rightResource.ScalarResources[resourceName] = 0
+// 			} else if defaultValue == Infinity {
+// 				rightResource.ScalarResources[resourceName] = -1
+// 			}
+// 		}
+// 	}
+
+// 	for resourceName := range rightResource.ScalarResources {
+// 		_, ok := leftResource.ScalarResources[resourceName]
+// 		if !ok {
+// 			if defaultValue == Zero {
+// 				leftResource.ScalarResources[resourceName] = 0
+// 			} else if defaultValue == Infinity {
+// 				leftResource.ScalarResources[resourceName] = -1
+// 			}
+// 		}
+// 	}
+// }
+
+// // ParseResourceList parses the given configuration map into an API
+// // ResourceList or returns an error.
+// func ParseResourceList(m map[string]string) (v1.ResourceList, error) {
+// 	if len(m) == 0 {
+// 		return nil, nil
+// 	}
+// 	rl := make(v1.ResourceList)
+// 	for k, v := range m {
+// 		switch v1.ResourceName(k) {
+// 		// CPU, memory, local storage, and PID resources are supported.
+// 		case v1.ResourceCPU, v1.ResourceMemory, v1.ResourceEphemeralStorage:
+// 			q, err := resource.ParseQuantity(v)
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			if q.Sign() == -1 {
+// 				return nil, fmt.Errorf("resource quantity for %q cannot be negative: %v", k, v)
+// 			}
+// 			rl[v1.ResourceName(k)] = q
+// 		default:
+// 			return nil, fmt.Errorf("cannot reserve %q resource", k)
+// 		}
+// 	}
+// 	return rl, nil
+// }
+
+// func GetMinResource() float64 {
+// 	return minResource
+// }
+
+// // ResourceNameList struct defines resource name collection
+// type ResourceNameList []v1.ResourceName
+
+// // Contains judges whether rr is subset of r
+// func (r ResourceNameList) Contains(rr ResourceNameList) bool {
+// 	for _, rrName := range ([]v1.ResourceName)(rr) {
+// 		isResourceExist := false
+// 		for _, rName := range ([]v1.ResourceName)(r) {
+// 			if rName == rrName {
+// 				isResourceExist = true
+// 				break
+// 			}
+// 		}
+// 		if !isResourceExist {
+// 			return false
+// 		}
+// 	}
+// 	return true
+// }
+
+func isCountQuota(name v1.ResourceName) bool {
+	return strings.HasPrefix(string(name), "count/")
 }
