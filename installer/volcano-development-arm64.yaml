@@ -8501,6 +8501,7 @@ data:
     actions: "enqueue, allocate, backfill"
     tiers:
     - plugins:
+      - name: resourcequota
       - name: priority
       - name: gang
       - name: conformance
