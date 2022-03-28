@@ -55,11 +55,21 @@ func registerWebhookConfig(kubeClient *kubernetes.Clientset, config *options.Con
 		klog.Infof("The service of webhook manager is <%s/%s/%s>.",
 			config.WebhookName, config.WebhookNamespace, service.Path)
 	}
+	namespaceSelector := &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      "kubernetes.io/metadata.name",
+				Operator: metav1.LabelSelectorOpNotIn,
+				Values:   []string{config.WebhookNamespace},
+			},
+		},
+	}
 	if service.MutatingConfig != nil {
 		for i := range service.MutatingConfig.Webhooks {
 			service.MutatingConfig.Webhooks[i].SideEffects = &sideEffect
 			service.MutatingConfig.Webhooks[i].AdmissionReviewVersions = reviewVersions
 			service.MutatingConfig.Webhooks[i].ClientConfig = clientConfig
+			service.MutatingConfig.Webhooks[i].NamespaceSelector = namespaceSelector
 		}
 
 		service.MutatingConfig.ObjectMeta.Name = webhookConfigName(config.WebhookName, service.Path)
@@ -76,6 +86,7 @@ func registerWebhookConfig(kubeClient *kubernetes.Clientset, config *options.Con
 			service.ValidatingConfig.Webhooks[i].SideEffects = &sideEffect
 			service.ValidatingConfig.Webhooks[i].AdmissionReviewVersions = reviewVersions
 			service.ValidatingConfig.Webhooks[i].ClientConfig = clientConfig
+			service.ValidatingConfig.Webhooks[i].NamespaceSelector = namespaceSelector
 		}
 
 		service.ValidatingConfig.ObjectMeta.Name = webhookConfigName(config.WebhookName, service.Path)
