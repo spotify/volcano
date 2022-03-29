@@ -714,41 +714,6 @@ func (ji *JobInfo) CheckTaskMinAvailable() bool {
 
 // CheckTaskMinAvailableReady return ready pods meet task minavaliable.
 func (ji *JobInfo) CheckTaskMinAvailableReady() bool {
-	if ji.MinAvailable < ji.TaskMinAvailableTotal {
-		return true
-	}
-	occupiedMap := map[TaskID]int32{}
-	for status, tasks := range ji.TaskStatusIndex {
-		if AllocatedStatus(status) ||
-			status == Succeeded {
-			for _, task := range tasks {
-				occupiedMap[getTaskID(task.Pod)]++
-			}
-			continue
-		}
-
-		if status == Pending {
-			for _, task := range tasks {
-				if task.InitResreq.IsEmpty() {
-					occupiedMap[getTaskID(task.Pod)]++
-				}
-			}
-		}
-	}
-	for taskID, minNum := range ji.TaskMinAvailable {
-		if occupiedMap[taskID] < minNum {
-			klog.V(4).Infof("Job %s/%s Task %s occupied %v less than task min avaliable", ji.Namespace, ji.Name, taskID, occupiedMap[taskID])
-			return false
-		}
-	}
-	return true
-}
-
-// CheckTaskMinAvailablePipelined return ready pods meet task minavaliable.
-func (ji *JobInfo) CheckTaskMinAvailablePipelined() bool {
-	if ji.MinAvailable < ji.TaskMinAvailableTotal {
-		return true
-	}
 	occupiedMap := map[TaskID]int32{}
 	for status, tasks := range ji.TaskStatusIndex {
 		if AllocatedStatus(status) ||
