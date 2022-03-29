@@ -712,36 +712,6 @@ func (ji *JobInfo) CheckTaskMinAvailable() bool {
 	return true
 }
 
-// CheckTaskMinAvailableReady return ready pods meet task minavaliable.
-func (ji *JobInfo) CheckTaskMinAvailableReady() bool {
-	occupiedMap := map[TaskID]int32{}
-	for status, tasks := range ji.TaskStatusIndex {
-		if AllocatedStatus(status) ||
-			status == Succeeded ||
-			status == Pipelined {
-			for _, task := range tasks {
-				occupiedMap[getTaskID(task.Pod)]++
-			}
-			continue
-		}
-
-		if status == Pending {
-			for _, task := range tasks {
-				if task.InitResreq.IsEmpty() {
-					occupiedMap[getTaskID(task.Pod)]++
-				}
-			}
-		}
-	}
-	for taskID, minNum := range ji.TaskMinAvailable {
-		if occupiedMap[taskID] < minNum {
-			klog.V(4).Infof("Job %s/%s Task %s occupied %v less than task min avaliable", ji.Namespace, ji.Name, taskID, occupiedMap[taskID])
-			return false
-		}
-	}
-	return true
-}
-
 // ValidTaskNum returns the number of tasks that are valid.
 func (ji *JobInfo) ValidTaskNum() int32 {
 	occupied := 0
