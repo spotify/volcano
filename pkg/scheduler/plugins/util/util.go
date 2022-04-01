@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog"
-	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
+	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/framework"
 
 	"volcano.sh/volcano/pkg/scheduler/api"
 	"volcano.sh/volcano/pkg/scheduler/framework"
@@ -232,17 +232,14 @@ func (pal *PodAffinityLister) FilteredList(podFilter PodFilter, selector labels.
 }
 
 // GenerateNodeMapAndSlice returns the nodeMap and nodeSlice generated from ssn
-func GenerateNodeMapAndSlice(nodes map[string]*api.NodeInfo) (map[string]*schedulernodeinfo.NodeInfo, []*v1.Node) {
-	var nodeMap map[string]*schedulernodeinfo.NodeInfo
-	var nodeSlice []*v1.Node
-	nodeMap = make(map[string]*schedulernodeinfo.NodeInfo)
+func GenerateNodeMapAndSlice(nodes map[string]*api.NodeInfo) map[string]*schedulernodeinfo.NodeInfo {
+	nodeMap := make(map[string]*schedulernodeinfo.NodeInfo)
 	for _, node := range nodes {
 		nodeInfo := schedulernodeinfo.NewNodeInfo(node.Pods()...)
 		nodeInfo.SetNode(node.Node)
 		nodeMap[node.Name] = nodeInfo
-		nodeSlice = append(nodeSlice, node.Node)
 	}
-	return nodeMap, nodeSlice
+	return nodeMap
 }
 
 // CachedNodeInfo is used in nodeorder and predicate plugin
@@ -254,7 +251,6 @@ type CachedNodeInfo struct {
 func (c *CachedNodeInfo) GetNodeInfo(name string) (*v1.Node, error) {
 	node, found := c.Session.Nodes[name]
 	if !found {
-
 		return nil, errors.NewNotFound(v1.Resource("node"), name)
 	}
 

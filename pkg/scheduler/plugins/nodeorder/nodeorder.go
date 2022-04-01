@@ -21,15 +21,18 @@ import (
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	utilFeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
+	k8sframework "k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/feature"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/imagelocality"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/interpodaffinity"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodeaffinity"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/noderesources"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/tainttoleration"
-	k8sframework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
 
 	"volcano.sh/volcano/pkg/scheduler/api"
 	"volcano.sh/volcano/pkg/scheduler/framework"
@@ -53,6 +56,8 @@ const (
 	MostRequestedWeight = "mostrequested.weight"
 	// TaintTolerationWeight is the key for providing Most Requested Priority Weight in YAML
 	TaintTolerationWeight = "tainttoleration.weight"
+	// ImageLocalityWeight is the key for providing Image Locality Priority Weight in YAML
+	ImageLocalityWeight = "imagelocality.weight"
 )
 
 type nodeOrderPlugin struct {
@@ -76,12 +81,13 @@ type priorityWeight struct {
 	podAffinityWeight      int
 	balancedResourceWeight int
 	taintTolerationWeight  int
+	imageLocalityWeight    int
 }
 
 // calculateWeight from the provided arguments.
 //
 // Currently only supported priorities are nodeaffinity, podaffinity, leastrequested,
-// mostrequested, balancedresouce.
+// mostrequested, balancedresouce, imagelocality.
 //
 // User should specify priority weights in the config in this format:
 //
@@ -97,14 +103,14 @@ type priorityWeight struct {
 //    - name: proportion
 //    - name: nodeorder
 //      arguments:
-//        leastrequested.weight: 2
+//        leastrequested.weight: 1
 //        mostrequested.weight: 0
-//        nodeaffinity.weight: 2
-//        podaffinity.weight: 2
-//        balancedresource.weight: 2
-//        tainttoleration.weight: 2
+//        nodeaffinity.weight: 1
+//        podaffinity.weight: 1
+//        balancedresource.weight: 1
+//        tainttoleration.weight: 1
+//        imagelocality.weight: 1
 func calculateWeight(args framework.Arguments) priorityWeight {
-
 	// Initial values for weights.
 	// By default, for backward compatibility and for reasonable scores,
 	// least requested priority is enabled and most requested priority is disabled.
@@ -115,6 +121,7 @@ func calculateWeight(args framework.Arguments) priorityWeight {
 		podAffinityWeight:      1,
 		balancedResourceWeight: 1,
 		taintTolerationWeight:  1,
+		imageLocalityWeight:    1,
 	}
 
 	// Checks whether nodeaffinity.weight is provided or not, if given, modifies the value in weight struct.
@@ -135,14 +142,16 @@ func calculateWeight(args framework.Arguments) priorityWeight {
 	// Checks whether tainttoleration.weight is provided or not, if given, modifies the value in weight struct.
 	args.GetInt(&weight.taintTolerationWeight, TaintTolerationWeight)
 
+	// Checks whether imagelocality.weight is provided or not, if given, modifies the value in weight struct.
+	args.GetInt(&weight.imageLocalityWeight, ImageLocalityWeight)
+
 	return weight
 }
 
 func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 	weight := calculateWeight(pp.pluginArguments)
 	pl := util.NewPodListerFromNode(ssn)
-	pods, _ := pl.List(labels.NewSelector())
-	nodeMap, nodeSlice := util.GenerateNodeMapAndSlice(ssn.Nodes)
+	nodeMap := util.GenerateNodeMapAndSlice(ssn.Nodes)
 
 	// Register event handlers to update task info in PodLister & nodeMap
 	ssn.AddEventHandler(&framework.EventHandler{
@@ -176,49 +185,78 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 		},
 	})
 
+	fts := feature.Features{
+		EnablePodAffinityNamespaceSelector: utilFeature.DefaultFeatureGate.Enabled(features.PodAffinityNamespaceSelector),
+		EnablePodDisruptionBudget:          utilFeature.DefaultFeatureGate.Enabled(features.PodDisruptionBudget),
+		EnablePodOverhead:                  utilFeature.DefaultFeatureGate.Enabled(features.PodOverhead),
+		EnableReadWriteOncePod:             utilFeature.DefaultFeatureGate.Enabled(features.ReadWriteOncePod),
+		EnableVolumeCapacityPriority:       utilFeature.DefaultFeatureGate.Enabled(features.VolumeCapacityPriority),
+		EnableCSIStorageCapacity:           utilFeature.DefaultFeatureGate.Enabled(features.CSIStorageCapacity),
+	}
+
 	// Initialize k8s scheduling plugins
-	handle := k8s.NewFrameworkHandle(pods, nodeSlice)
+	handle := k8s.NewFrameworkHandle(nodeMap, ssn.KubeClient())
 	// 1. NodeResourcesLeastAllocated
-	laArgs := &config.NodeResourcesLeastAllocatedArgs{
-		Resources: []config.ResourceSpec{
-			{
-				Name:   "cpu",
-				Weight: 50,
-			},
-			{
-				Name:   "memory",
-				Weight: 50,
-			},
+	leastAllocatedArgs := &config.NodeResourcesFitArgs{
+		ScoringStrategy: &config.ScoringStrategy{
+			Type:      config.LeastAllocated,
+			Resources: []config.ResourceSpec{{Name: "cpu", Weight: 50}, {Name: "memory", Weight: 50}},
 		},
 	}
-	p, _ := noderesources.NewLeastAllocated(laArgs, handle)
-	leastAllocated := p.(*noderesources.LeastAllocated)
+	p, _ := noderesources.NewFit(leastAllocatedArgs, handle, fts)
+	leastAllocated := p.(*noderesources.Fit)
 
 	// 2. NodeResourcesMostAllocated
-	defaultResourceMostAllocatedSet := []config.ResourceSpec{
-		{Name: string(v1.ResourceCPU), Weight: 1},
-		{Name: string(v1.ResourceMemory), Weight: 1},
+	mostAllocatedArgs := &config.NodeResourcesFitArgs{
+		ScoringStrategy: &config.ScoringStrategy{
+			Type:      config.MostAllocated,
+			Resources: []config.ResourceSpec{{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1}},
+		},
 	}
-	args := config.NodeResourcesMostAllocatedArgs{Resources: defaultResourceMostAllocatedSet}
-	p, _ = noderesources.NewMostAllocated(&args, handle)
-	mostAllocated := p.(*noderesources.MostAllocated)
+	noderesources.NewFit(mostAllocatedArgs, handle, fts)
+	p, _ = noderesources.NewFit(mostAllocatedArgs, handle, fts)
+	mostAllocation := p.(*noderesources.Fit)
 
 	// 3. NodeResourcesBalancedAllocation
-	p, _ = noderesources.NewBalancedAllocation(nil, handle)
+	blArgs := &config.NodeResourcesBalancedAllocationArgs{
+		Resources: []config.ResourceSpec{
+			{Name: string(v1.ResourceCPU), Weight: 1},
+			{Name: string(v1.ResourceMemory), Weight: 1},
+			{Name: "nvidia.com/gpu", Weight: 1},
+		},
+	}
+	p, _ = noderesources.NewBalancedAllocation(blArgs, handle, fts)
 	balancedAllocation := p.(*noderesources.BalancedAllocation)
 
 	// 4. NodeAffinity
-	p, _ = nodeaffinity.New(nil, handle)
+	naArgs := &config.NodeAffinityArgs{
+		AddedAffinity: &v1.NodeAffinity{},
+	}
+	p, _ = nodeaffinity.New(naArgs, handle)
 	nodeAffinity := p.(*nodeaffinity.NodeAffinity)
+
+	// 5. ImageLocality
+	p, _ = imagelocality.New(nil, handle)
+	imageLocality := p.(*imagelocality.ImageLocality)
+
 	nodeOrderFn := func(task *api.TaskInfo, node *api.NodeInfo) (float64, error) {
 		var nodeScore = 0.0
 
-		//TODO: Add ImageLocalityPriority Function once priorityMetadata is published
-		//Issue: #74132 in kubernetes ( https://github.com/kubernetes/kubernetes/issues/74132 )
+		state := k8sframework.NewCycleState()
+		if weight.imageLocalityWeight != 0 {
+			score, status := imageLocality.Score(context.TODO(), state, task.Pod, node.Name)
+			if !status.IsSuccess() {
+				klog.Warningf("Image Locality Priority Failed because of Error: %v", status.AsError())
+				return 0, status.AsError()
+			}
+
+			// If imageLocalityWeight is provided, host.Score is multiplied with weight, if not, host.Score is added to total score.
+			nodeScore += float64(score) * float64(weight.imageLocalityWeight)
+		}
 
 		// NodeResourcesLeastAllocated
 		if weight.leastReqWeight != 0 {
-			score, status := leastAllocated.Score(context.TODO(), nil, task.Pod, node.Name)
+			score, status := leastAllocated.Score(context.TODO(), state, task.Pod, node.Name)
 			if !status.IsSuccess() {
 				klog.Warningf("Least Allocated Priority Failed because of Error: %v", status.AsError())
 				return 0, status.AsError()
@@ -230,7 +268,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 
 		// NodeResourcesMostAllocated
 		if weight.mostReqWeight != 0 {
-			score, status := mostAllocated.Score(context.TODO(), nil, task.Pod, node.Name)
+			score, status := mostAllocation.Score(context.TODO(), state, task.Pod, node.Name)
 			if !status.IsSuccess() {
 				klog.Warningf("Most Allocated Priority Failed because of Error: %v", status.AsError())
 				return 0, status.AsError()
@@ -242,7 +280,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 
 		// NodeResourcesBalancedAllocation
 		if weight.balancedResourceWeight != 0 {
-			score, status := balancedAllocation.Score(context.TODO(), nil, task.Pod, node.Name)
+			score, status := balancedAllocation.Score(context.TODO(), state, task.Pod, node.Name)
 			if !status.IsSuccess() {
 				klog.Warningf("Balanced Resource Allocation Priority Failed because of Error: %v", status.AsError())
 				return 0, status.AsError()
@@ -254,7 +292,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 
 		// NodeAffinity
 		if weight.nodeAffinityWeight != 0 {
-			score, status := nodeAffinity.Score(context.TODO(), nil, task.Pod, node.Name)
+			score, status := nodeAffinity.Score(context.TODO(), state, task.Pod, node.Name)
 			if !status.IsSuccess() {
 				klog.Warningf("Calculate Node Affinity Priority Failed because of Error: %v", status.AsError())
 				return 0, status.AsError()
@@ -271,7 +309,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 	ssn.AddNodeOrderFn(pp.Name(), nodeOrderFn)
 
 	plArgs := &config.InterPodAffinityArgs{}
-	p, _ = interpodaffinity.New(plArgs, handle)
+	p, _ = interpodaffinity.New(plArgs, handle, fts)
 	interPodAffinity := p.(*interpodaffinity.InterPodAffinity)
 
 	p, _ = tainttoleration.New(nil, handle)
@@ -319,13 +357,24 @@ func interPodAffinityScore(
 	}
 
 	nodescoreList := make(k8sframework.NodeScoreList, len(nodes))
-	errCh := make(chan error, 1)
-	workqueue.ParallelizeUntil(context.TODO(), 16, len(nodes), func(index int) {
+	// the default parallelization worker number is 16.
+	// the whole scoring will fail if one of the processes failed.
+	// so just create a parallelizeContext to control the whole ParallelizeUntil process.
+	// if the parallelizeCancel is invoked, the whole "ParallelizeUntil" goes to the end.
+	// this could avoid extra computation, especially in huge cluster.
+	// and the ParallelizeUntil guarantees only "workerNum" goroutines will be working simultaneously.
+	// so it's enough to allocate workerNum size for errCh.
+	// note that, in such case, size of errCh should be no less than parallelization number
+	workerNum := 16
+	errCh := make(chan error, workerNum)
+	parallelizeContext, parallelizeCancel := context.WithCancel(context.TODO())
+	workqueue.ParallelizeUntil(parallelizeContext, workerNum, len(nodes), func(index int) {
 		nodeName := nodes[index].Name
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		s, status := interPodAffinity.Score(ctx, state, pod, nodeName)
 		if !status.IsSuccess() {
+			parallelizeCancel()
 			errCh <- fmt.Errorf("calculate inter pod affinity priority failed %v", status.Message())
 			return
 		}
@@ -371,13 +420,17 @@ func taintTolerationScore(
 	}
 
 	nodescoreList := make(k8sframework.NodeScoreList, len(nodes))
-	errCh := make(chan error, 1)
-	workqueue.ParallelizeUntil(context.TODO(), 16, len(nodes), func(index int) {
+	// size of errCh should be no less than parallelization number, see interPodAffinityScore.
+	workerNum := 16
+	errCh := make(chan error, workerNum)
+	parallelizeContext, parallelizeCancel := context.WithCancel(context.TODO())
+	workqueue.ParallelizeUntil(parallelizeContext, workerNum, len(nodes), func(index int) {
 		nodeName := nodes[index].Name
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		s, status := taintToleration.Score(ctx, cycleState, pod, nodeName)
 		if !status.IsSuccess() {
+			parallelizeCancel()
 			errCh <- fmt.Errorf("calculate taint toleration priority failed %v", status.Message())
 			return
 		}

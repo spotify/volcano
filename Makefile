@@ -15,8 +15,8 @@
 BIN_DIR=_output/bin
 RELEASE_DIR=_output/release
 REPO_PATH=volcano.sh/volcano
-IMAGE_PREFIX=volcanosh/vc
-CRD_OPTIONS ?= "crd:crdVersions=v1"
+IMAGE_PREFIX ?= ghcr.io/spotify/volcano/vc
+CRD_OPTIONS ?= "crd:crdVersions=v1,generateEmbeddedObjectMeta=true"
 CC ?= "gcc"
 SUPPORT_PLUGINS ?= "no"
 CRD_VERSION ?= v1
@@ -85,7 +85,7 @@ image_bins: init
 		CC=${CC} CGO_ENABLED=1 $(GOBIN)/gox -osarch=${REL_OSARCH} -ldflags ${LD_FLAGS} -output ${BIN_DIR}/${REL_OSARCH}/vc-scheduler ./cmd/scheduler;\
 	else\
 	 	CC=${CC} CGO_ENABLED=0 $(GOBIN)/gox -osarch=${REL_OSARCH} -ldflags ${LD_FLAGS} -output ${BIN_DIR}/${REL_OSARCH}/vc-scheduler ./cmd/scheduler;\
-  	fi;
+	fi;
 
 images: image_bins
 	for name in controller-manager scheduler webhook-manager; do\
@@ -114,8 +114,8 @@ generate-code:
 
 # Generate manifests e.g. CRD, RBAC etc.
 manifests: controller-gen
-	$(CONTROLLER_GEN) $(CRD_OPTIONS) paths="./vendor/volcano.sh/apis/pkg/apis/scheduling/v1beta1;./vendor/volcano.sh/apis/pkg/apis/batch/v1alpha1;./vendor/volcano.sh/apis/pkg/apis/bus/v1alpha1;" output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) "crd:crdVersions=v1beta1" paths="./vendor/volcano.sh/apis/pkg/apis/scheduling/v1beta1;./vendor/volcano.sh/apis/pkg/apis/batch/v1alpha1;./vendor/volcano.sh/apis/pkg/apis/bus/v1alpha1;" output:crd:artifacts:config=config/crd/v1beta1
+	$(CONTROLLER_GEN) $(CRD_OPTIONS) paths="./vendor/volcano.sh/apis/pkg/apis/scheduling/v1beta1;./vendor/volcano.sh/apis/pkg/apis/batch/v1alpha1;./vendor/volcano.sh/apis/pkg/apis/bus/v1alpha1;./vendor/volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1" output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) "crd:crdVersions=v1beta1" paths="./vendor/volcano.sh/apis/pkg/apis/scheduling/v1beta1;./vendor/volcano.sh/apis/pkg/apis/batch/v1alpha1;./vendor/volcano.sh/apis/pkg/apis/bus/v1alpha1;./vendor/volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1" output:crd:artifacts:config=config/crd/v1beta1
 
 unit-test:
 	go clean -testcache
@@ -139,6 +139,9 @@ e2e-test-jobseq:
 e2e-test-vcctl:
 	E2E_TYPE=VCCTL ./hack/run-e2e-kind.sh
 
+e2e-test-stress:
+	E2E_TYPE=STRESS ./hack/run-e2e-kind.sh
+
 generate-yaml: init manifests
 	./hack/generate-yaml.sh TAG=${RELEASE_VER} CRD_VERSION=${CRD_VERSION}
 
@@ -151,20 +154,26 @@ dev-env:
 release: images generate-yaml
 	./hack/publish.sh
 
+release-images: images
+	echo "pushing ${IMAGE_PREFIX}-controller-manager:${TAG}"
+	docker push ${IMAGE_PREFIX}-controller-manager:${TAG}
+	echo "pushing ${IMAGE_PREFIX}-scheduler:${TAG}"
+	docker push ${IMAGE_PREFIX}-scheduler:${TAG}
+	echo "pushing ${IMAGE_PREFIX}-webhook-manager:${TAG}"
+	docker push ${IMAGE_PREFIX}-webhook-manager:${TAG}
+
 clean:
 	rm -rf _output/
 	rm -f *.log
 
 verify:
 	hack/verify-gofmt.sh
-	hack/verify-golint.sh
 	hack/verify-gencode.sh
 	hack/verify-vendor.sh
 	hack/verify-vendor-licenses.sh
 
 lint: ## Lint the files
-	golangci-lint version
-	golangci-lint run pkg/kube pkg/version pkg/apis/...
+	hack/verify-golangci-lint.sh
 
 verify-generated-yaml:
 	./hack/check-generated-yaml.sh
@@ -186,7 +195,7 @@ ifeq (, $(shell which controller-gen))
 	CONTROLLER_GEN_TMP_DIR=$$(mktemp -d) ;\
 	cd $$CONTROLLER_GEN_TMP_DIR ;\
 	go mod init tmp ;\
-	go get sigs.k8s.io/controller-tools/cmd/controller-gen@v0.4.1 ;\
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.6.0 ;\
 	rm -rf $$CONTROLLER_GEN_TMP_DIR ;\
 	}
 CONTROLLER_GEN=$(GOBIN)/controller-gen
@@ -196,4 +205,6 @@ endif
 
 update-development-yaml:
 	make generate-yaml TAG=latest RELEASE_DIR=installer
+	cp installer/volcano-latest.yaml installer/volcano-development-arm64.yaml
+	# gsed -r -i 's#(.*)image:([^:]*):(.*)#\1image:\2-arm64:\3#'  installer/volcano-development-arm64.yaml
 	mv installer/volcano-latest.yaml installer/volcano-development.yaml
