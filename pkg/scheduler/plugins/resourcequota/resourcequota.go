@@ -42,7 +42,12 @@ func (rq *resourceQuotaPlugin) OnSessionOpen(ssn *framework.Session) {
 			return util.Permit
 		}
 
-		quotas := ssn.NamespaceInfo[api.NamespaceName(job.Namespace)].QuotaStatus
+		namespaceInfo := ssn.NamespaceInfo[api.NamespaceName(job.Namespace)]
+		if namespaceInfo == nil {
+			return util.Abstain
+		}
+
+		quotas := namespaceInfo.QuotaStatus
 		for _, resourceQuota := range quotas {
 			hardResources := quotav1.ResourceNames(resourceQuota.Hard)
 
